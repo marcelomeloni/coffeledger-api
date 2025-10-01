@@ -284,34 +284,44 @@ export const getBatchDetails = async (req, res) => {
 
         // --- PASSO 2: BUSCAR DADOS ON-CHAIN ---
         const batchPubKey = new PublicKey(batchId);
-        
         const batchOnChain = await program.account.batch.fetch(batchPubKey);
         const stageCount = batchOnChain.nextStageIndex;
 
-        // --- PASSO 3: BUSCAR CONTAS DE ETAPA ---
+        // --- PASSO 3: BUSCAR CONTAS DE ETAPA E METADADOS DO IPFS ---
         let stagesData = [];
         if (stageCount > 0) {
-            const stagePdaPromises = [];
+            const stagePromises = [];
             for (let i = 0; i < stageCount; i++) {
-                stagePdaPromises.push(
-                    PublicKey.findProgramAddress(
+                stagePromises.push(async () => {
+                    const [stagePda] = await PublicKey.findProgramAddress(
                         [Buffer.from(STAGE_SEED), batchPubKey.toBuffer(), new BN(i).toBuffer('le', 2)],
                         program.programId
-                    )
-                );
+                    );
+                    
+                    const stageAccount = await program.account.stage.fetch(stagePda);
+                    
+                    // ✨ MUDANÇA CRUCIAL: BUSCAR O METADADO DO IPFS
+                    const ipfsUrl = `https://red-obedient-stingray-854.mypinata.cloud/ipfs/${stageAccount.stageDataHash}`;
+                    const metadataResponse = await fetch(ipfsUrl);
+                    const metadata = await metadataResponse.json();
+                    
+                    return {
+                        ...stageAccount,
+                        ipfsCid: stageAccount.stageDataHash, // Adiciona o CID para fácil acesso
+                        metadata: metadata
+                    };
+                });
             }
-            const stagePdaInfos = await Promise.all(stagePdaPromises);
-            const stagePdas = stagePdaInfos.map(info => info[0]);
             
-            const stagesAccounts = await program.account.stage.fetchMultiple(stagePdas);
-            stagesData = stagesAccounts.filter(acc => acc !== null);
+            // Executa todas as buscas em paralelo
+            const results = await Promise.all(stagePromises.map(p => p()));
+            stagesData = results;
         }
 
         // --- PASSO 4: COMBINAR E RETORNAR A RESPOSTA ---
         const responsePayload = {
             details: {
                 ...batchCache,
-                // ✨ CORREÇÃO: Usando (partnersData || []) para evitar erro se não houver parceiros
                 batch_participants: (partnersData || []).map(p => ({ partner: p.partner }))
             },
             stages: stagesData
