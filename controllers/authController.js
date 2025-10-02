@@ -12,21 +12,22 @@ export const checkUserRole = async (req, res) => {
     }
 
     try {
-        // 1. Verifica se é um Dono de Marca (prioridade máxima)
+        // 1. Verifica se é um Dono de Marca (apenas checando a existência da chave pública)
         console.log('🔍 Verificando se é Dono de Marca...');
         const { data: brandOwner, error: brandOwnerError } = await supabase
             .from('users')
-            .select('public_key, role')
+            .select('public_key') // <--- REMOVIDO 'role' daqui
             .eq('public_key', publicKey)
             .single();
 
         if (brandOwnerError && brandOwnerError.code !== 'PGRST116') {
             console.error('Erro ao buscar dono de marca:', brandOwnerError);
+            // Continua a execução, pois pode ser um parceiro
         }
 
         if (brandOwner) {
             console.log('✅ Encontrado como Dono de Marca');
-            return res.status(200).json({ 
+            return res.status(200).json({
                 role: 'batchOwner',
                 publicKey: brandOwner.public_key
             });
@@ -47,14 +48,14 @@ export const checkUserRole = async (req, res) => {
         if (partner) {
             if (!partner.is_active) {
                 console.warn('⚠️ Parceiro encontrado mas inativo:', partner.public_key);
-                return res.status(200).json({ 
+                return res.status(200).json({
                     role: 'noAuth',
                     reason: 'partner_inactive'
                 });
             }
 
             console.log('✅ Encontrado como Parceiro:', partner.role);
-            return res.status(200).json({ 
+            return res.status(200).json({
                 role: partner.role,
                 publicKey: partner.public_key,
                 partnerName: partner.name
@@ -63,14 +64,14 @@ export const checkUserRole = async (req, res) => {
 
         // 3. Se não for encontrado em nenhuma tabela
         console.warn('❌ Chave pública não encontrada em nenhuma tabela:', publicKey);
-        return res.status(200).json({ 
+        return res.status(200).json({
             role: 'noAuth',
             reason: 'not_found'
         });
 
     } catch (error) {
         console.error('💥 Erro interno ao verificar o papel do usuário:', error);
-        return res.status(500).json({ 
+        return res.status(500).json({
             error: 'Erro interno ao verificar o papel.',
             details: error.message
         });
@@ -112,3 +113,4 @@ export const registerPartner = async (req, res) => {
         res.status(500).json({ error: 'Erro interno do servidor' });
     }
 };
+
