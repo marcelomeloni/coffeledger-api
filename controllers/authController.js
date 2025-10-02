@@ -1,46 +1,114 @@
+// backend/api/auth.js (atualizado)
 import { supabase } from '../utils/supabase.js';
 
 export const checkUserRole = async (req, res) => {
     const { publicKey } = req.body;
 
+    console.log('🔐 Recebida solicitação de verificação de role para:', publicKey);
+
     if (!publicKey) {
+        console.warn('❌ Chave pública não fornecida');
         return res.status(400).json({ error: 'A chave pública é obrigatória.' });
     }
 
     try {
-        // 1. Verifica se é um Dono de Marca (sempre o mais alto privilégio)
-        const { data: brandOwner } = await supabase
+        // 1. Verifica se é um Dono de Marca (prioridade máxima)
+        console.log('🔍 Verificando se é Dono de Marca...');
+        const { data: brandOwner, error: brandOwnerError } = await supabase
             .from('users')
-            .select('public_key')
+            .select('public_key, role')
             .eq('public_key', publicKey)
             .single();
+
+        if (brandOwnerError && brandOwnerError.code !== 'PGRST116') {
+            console.error('Erro ao buscar dono de marca:', brandOwnerError);
+        }
 
         if (brandOwner) {
-            return res.status(200).json({ role: 'batchOwner' });
+            console.log('✅ Encontrado como Dono de Marca');
+            return res.status(200).json({ 
+                role: 'batchOwner',
+                publicKey: brandOwner.public_key
+            });
         }
 
-        // 2. 🔥 MUDANÇA CRÍTICA: Buscar o papel específico do parceiro
-        //    Em vez de apenas 'public_key', agora selecionamos também a coluna 'role'.
-        const { data: partner } = await supabase
+        // 2. Verifica se é um Parceiro com role específico
+        console.log('🔍 Verificando se é Parceiro...');
+        const { data: partner, error: partnerError } = await supabase
             .from('partners')
-            .select('public_key, role') // <-- MUDANÇA AQUI
+            .select('public_key, role, name, is_active')
             .eq('public_key', publicKey)
             .single();
-        
-        if (partner) {
-            // Em vez de retornar 'stagePartner', retornamos o papel real do banco de dados.
-            return res.status(200).json({ role: partner.role }); // <-- MUDANÇA AQUI
+
+        if (partnerError && partnerError.code !== 'PGRST116') {
+            console.error('Erro ao buscar parceiro:', partnerError);
         }
 
-        // 3. Se não for nenhum dos dois, não tem autorização
-        return res.status(200).json({ role: 'noAuth' });
+        if (partner) {
+            if (!partner.is_active) {
+                console.warn('⚠️ Parceiro encontrado mas inativo:', partner.public_key);
+                return res.status(200).json({ 
+                    role: 'noAuth',
+                    reason: 'partner_inactive'
+                });
+            }
+
+            console.log('✅ Encontrado como Parceiro:', partner.role);
+            return res.status(200).json({ 
+                role: partner.role,
+                publicKey: partner.public_key,
+                partnerName: partner.name
+            });
+        }
+
+        // 3. Se não for encontrado em nenhuma tabela
+        console.warn('❌ Chave pública não encontrada em nenhuma tabela:', publicKey);
+        return res.status(200).json({ 
+            role: 'noAuth',
+            reason: 'not_found'
+        });
 
     } catch (error) {
-        // Ignora o erro "linha não encontrada" que o .single() pode gerar
-        if (error.code === 'PGRST116') {
-             return res.status(200).json({ role: 'noAuth' });
+        console.error('💥 Erro interno ao verificar o papel do usuário:', error);
+        return res.status(500).json({ 
+            error: 'Erro interno ao verificar o papel.',
+            details: error.message
+        });
+    }
+};
+
+// Nova rota para registro de parceiros
+export const registerPartner = async (req, res) => {
+    const { publicKey, role, name, email, metadata } = req.body;
+
+    try {
+        const { data, error } = await supabase
+            .from('partners')
+            .insert([
+                {
+                    public_key: publicKey,
+                    role: role,
+                    name: name,
+                    email: email,
+                    metadata: metadata || {},
+                    is_active: true,
+                    created_at: new Date().toISOString()
+                }
+            ])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Erro ao registrar parceiro:', error);
+            return res.status(400).json({ error: error.message });
         }
-        console.error('Erro ao verificar o papel do usuário:', error);
-        res.status(500).json({ error: 'Erro interno ao verificar o papel.' });
+
+        res.status(201).json({ 
+            success: true, 
+            partner: data 
+        });
+    } catch (error) {
+        console.error('Erro ao registrar parceiro:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
     }
 };
