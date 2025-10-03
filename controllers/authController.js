@@ -16,20 +16,21 @@ export const checkUserRole = async (req, res) => {
         console.log('🔍 Verificando se é Dono de Marca...');
         const { data: brandOwner, error: brandOwnerError } = await supabase
             .from('users')
-            .select('public_key') // <--- REMOVIDO 'role' daqui
+            .select('public_key')
             .eq('public_key', publicKey)
             .single();
 
         if (brandOwnerError && brandOwnerError.code !== 'PGRST116') {
             console.error('Erro ao buscar dono de marca:', brandOwnerError);
-            // Continua a execução, pois pode ser um parceiro
         }
 
         if (brandOwner) {
             console.log('✅ Encontrado como Dono de Marca');
             return res.status(200).json({
                 role: 'batchOwner',
-                publicKey: brandOwner.public_key
+                publicKey: brandOwner.public_key,
+                partnerId: null, // Donos de marca não têm um ID de parceiro fixo neste modelo
+                partnerName: null,
             });
         }
 
@@ -37,7 +38,7 @@ export const checkUserRole = async (req, res) => {
         console.log('🔍 Verificando se é Parceiro...');
         const { data: partner, error: partnerError } = await supabase
             .from('partners')
-            .select('public_key, role, name, is_active')
+            .select('id, public_key, role, name, is_active') // ✨ MUDANÇA: 'id' adicionado aqui
             .eq('public_key', publicKey)
             .single();
 
@@ -58,6 +59,7 @@ export const checkUserRole = async (req, res) => {
             return res.status(200).json({
                 role: partner.role,
                 publicKey: partner.public_key,
+                partnerId: partner.id, // ✨ MUDANÇA: O ID do parceiro é retornado aqui
                 partnerName: partner.name
             });
         }
